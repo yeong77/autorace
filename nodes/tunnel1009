@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy
+import roslaunch
+import os
+import sys
+from enum import Enum
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import UInt8
+import time
+
+class DetectScan():
+	def __init__(self):
+		self.state = 0
+		self.oldtime = 0
+		self.newtime = 0
+		self.ot = time.time()
+		self.nt = 0
+		self.ti = 0
+		self.count = 0
+		self.time_interval = 0
+		self.plus = 0
+		self.point = 0
+		self.ntime = 0
+		self.ang = 0.5
+		self.BURGER_MAX_LIN_VEL = 0.22
+		self.BURGER_MAX_ANG_VEL_left = 2.4 #2.83
+		self.BURGER_MAX_ANG_VEL_right = 2.2
+		self.target_linear_vel = 0.0
+		self.target_angular_vel = 0.0
+		self.pub_cmd_vel = rospy.Publisher("cmd_vel", Twist, queue_size=10)
+		self.lane_pub = rospy.Publisher("/lane", UInt8, queue_size=1)
+		self.sub_point = rospy.Subscriber('/blue/point', UInt8, self.receive_point, queue_size = 1)
+		self.sub_scan_obstacle = rospy.Subscriber('/scan', LaserScan, self.detect_scan, queue_size=1)
+
+	def receive_point(self, point):
+		self.point = point.data
+
+	def detect_scan(self, scan):
+		self.nt = time.time()
+		self.ti = self.nt - self.ot
+		global left_min, right_min, left_min_index, right_min_index, target_linear_vel, target_angular_vel
+		
+		scan = scan.ranges
+		
+		scan_left_tuple = scan[10:30] #[850:95]
+		self.scan_left_list = list(scan_left_tuple)
+		
+		for i in self.scan_left_list: #except
+			if i < 0.01:
+				zero = self.scan_left_list.index(i)
+				self.scan_left_list[zero] = 9
+			else:	
+				pass
+
+		scan_right_tuple = scan[180:360] #[265:275]
+		self.scan_right_list = list(scan_right_tuple)
+		self.scan_right_list = self.scan_right_list[::-1]
+		for i in self.scan_right_list:	
+			if i < 0.01:
+				zero = self.scan_right_list.index(i)
+				self.scan_right_list[zero] = 9
+				#print scan_right
+			else:
+				pass
+		
+		left_min = min(self.scan_left_list)
+		left_min_index = self.scan_left_list.index(left_min)
+		
+		right_min = min(self.scan_right_list)
+		right_min_index = self.scan_right_list.index(right_min)
+
+		self.target_linear_vel = node.checkLinearLimitVelocity(self.target_linear_vel + 0.02) #0.22
+		if self.scan_right_list[90] > 0.01 and self.scan_right_list[90] < 0.22:
+			self.state = 1
+	
+		self.tunnel()
+			
+		
+	def tunnel(self):
+		if self.state == 0:
+			self.target_linear_vel = 0.18
+			self.target_angular_vel = 0.0
+			self.move()
+
+		elif self.state == 1:
+			right_angular = (right_min_index - 90) * - 0.1  ##0.03
+			self.target_angular_vel = node.checkAngularLimitVelocity_right(right_angular)
+			self.move()
+			
+						
+	
+	def move(self):
+		twist = Twist()
+		print ("linear == %f" %(self.target_linear_vel))
+		print ("angular == %f" %(self.target_angular_vel))
+
+		twist.linear.x = self.target_linear_vel; twist.linear.y = 0.0; twist.linear.z = 0.0
+		twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = self.target_angular_vel
+
+		self.pub_cmd_vel.publish(twist)
+		#time.sleep(0.01)
+
+	def stop(self):
+		twist = Twist()
+
+		twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+		twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+		self.pub_cmd_vel.publish(twist)
+		time.sleep(0.1)
+
+	def constrain(self,input, low, high):
+		if input < low: # create limit = -0.22
+			input = low
+		elif input > high: # create limit = 0.22
+			input = high
+		else:
+			input = input
+		return input
+
+	def checkLinearLimitVelocity(self,vel): # linear.x
+		vel = node.constrain(vel, -(self.BURGER_MAX_LIN_VEL), self.BURGER_MAX_LIN_VEL)
+		return vel # constrain - low or high(-0.22 or 0.22)
+
+	def checkAngularLimitVelocity_left(self,vel):# angular.z
+		vel = node.constrain(vel, -(self.BURGER_MAX_ANG_VEL_left), self.BURGER_MAX_ANG_VEL_left)
+		return vel
+	def checkAngularLimitVelocity_right(self,vel): # angular.z
+		vel = node.constrain(vel, -(self.BURGER_MAX_ANG_VEL_right), self.BURGER_MAX_ANG_VEL_right)
+		return vel
+
+			
+			
+	def main(self):
+		rospy.spin()
+
+if __name__ == '__main__':
+	rospy.init_node('tunnel1004')
+	node = DetectScan()
+	node.main()
+

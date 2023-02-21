@@ -1,0 +1,411 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+################################################################################
+# Copyright 2018 ROBOTIS CO., LTD.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+# Author: Leon Jung, Gilbert
+ 
+import rospy  # openCV와 py간의 연결
+import numpy as np  # 1차원 배열 라이브러리 선언
+import math  # root, 분산, 표준편차 등을 사용
+import tf  # 시간에 따른 3차원 프레임에 대한 분산
+import os 
+import cv2  # CVbridge
+from enum import Enum  # 열거형 라이브러리 선언
+from std_msgs.msg import UInt8, Float64, String  # Uint8, Float64, String메시지 형식 사용
+from sensor_msgs.msg import LaserScan, Image, CompressedImage  # 레이저 센서, 이미지 처리, 압축 이미지
+from geometry_msgs.msg import Twist  # vector3(3차원 벡터)를 부동 소수점 형식의 메시지로 전달
+from nav_msgs.msg import Odometry  # 바퀴 회전수에 따른 좌표 기록
+from turtlebot3_autorace_msgs.msg import MovingParam  # 저장된 파람값 불러오기
+
+class DetectContruction():  # DetectContruction클래스 선언
+    def __init__(self):  # 생성자
+        # subscribes state : white line reliability
+        self.sub_construction_order = rospy.Subscriber('/detect/construction_order', UInt8, self.cbConstructionOrder, queue_size=1)
+#'/detect/construction_order'에서 UInt8메시지 받음, callback함수로 cbConstructionOrder() 실행
+        self.sub_scan_obstacle = rospy.Subscriber('/detect/scan', LaserScan, self.cbScanObstacle, queue_size=1)
+#'/detect/scan'에서 LaserScan변수 받아옴, callback함수로 cbScanObstacle() 실행
+        self.sub_construction_finished = rospy.Subscriber('/control/construction_finished', UInt8, self.cbConstructionFinished, queue_size = 1)
+#'/control/construction_finished'에서 UInt8메시지 받음, callback함수로 cbConstructionFinished() 실행
+        self.sub_moving_completed = rospy.Subscriber('/control/moving/complete', UInt8, self.cbMovingComplete, queue_size = 1)
+#'/control/moving/complete'에서 UInt8메시지 받음, callback함수로 cbMovingComplete() 실행
+
+        self.pub_construction_return = rospy.Publisher('/detect/construction_stamped', UInt8, queue_size=1)
+#'/detect/construction_stamped'으로 UInt8메시지 전달
+        self.pub_construction_start = rospy.Publisher('/control/construction_start', UInt8, queue_size = 1)
+#'/control/construction_start'으로 UInt8메시지 전달
+        self.pub_moving = rospy.Publisher('/control/moving/state', MovingParam, queue_size= 1)
+#'/control/moving/state'으로 MovingParam전달
+        self.pub_max_vel = rospy.Publisher('/control/max_vel', Float64, queue_size = 1)
+#'/control/max_vel'으로 Float64메시지 전달
+        self.pub_timer_start = rospy.Publisher('/detect/timer/start', Float64, queue_size= 1)
+#'/detect/timer/start'으로 Float64메시지 전달
+       
+        self.StepOfConstruction = Enum('StepOfConstruction', 'searching_construction_sign find_obstacle motion_lf exit')  # 열거형으로 step을 정함.(표지판 찾기→장애물 찾기→행동하기→나가기)
+        self.is_obstacle_detected = False
+        self.is_construction_finished = False
+        self.is_motion_allowed = False
+        self.is_moving_complete = False  # 주행 중 사용할 변수 모두 false로 바꿔놓음
+
+    def cbMovingComplete(self, data):  # 주행 완료됬음을 반환
+        self.is_moving_complete = True
+
+    def cbConstructionOrder(self, order):  # enum의 값을 받았을 때 할 행동
+        msg_pub_construction_return = UInt8()  # msg_pub_construction_return의 형식을 UInt8로 함
+
+	# 받은 order가 searching_construction_sign일 때
+        if order.data == self.StepOfConstruction.searching_construction_sign.value:
+            rospy.loginfo("begin")  # "begin"을 cmd에 띄운다.
+
+            msg_pub_construction_return.data = self.StepOfConstruction.searching_construction_sign.value  # msg_pub_construction_return의 값을 searching_construction_sign로 한다.
+
+	# 받은 order가 find_obstacle일 때
+        elif order.data == self.StepOfConstruction.find_obstacle.value:
+            rospy.loginfo("find obstacle")  # "find obstacle"을 cmd에 띄운다.
+
+	    #계속 반복하기
+            while True:
+		# is_obstacle_detected가 true일 때
+                if self.is_obstacle_detected == True:
+                    rospy.loginfo("Encounter obstacle")  # "Encounter obstacle"
+                    break  # 반복 중단
+                else:  # 아닐 경우 그냥 통과한다.
+                    pass
+                    # rospy.loginfo("Not yet")
+
+            msg_pub_max_vel = Float64()  # 최대 속도값을 부동소수점 형식으로 정한다.
+            msg_pub_max_vel.data = 0.0  # 초기 최대 속도값을 0으로 한다.
+            self.pub_max_vel.publish(msg_pub_max_vel)  # '/control/max_vel'에 최대속도값을 보낸다.
+            
+
+            msg_pub_construction_return.data = self.StepOfConstruction.find_obstacle.value  # msg_pub_construction_return를 find_obstacle로 한다.
+
+	# order가 motion_lf일 때
+        elif order.data == self.StepOfConstruction.motion_lf.value:
+
+            rospy.sleep(1)  # 3초 대기 ######################더 짧은 시간으로 고치기#####################
+
+            rospy.loginfo("##############go_str_2cm##############")  # 전진 2cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.02
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############tur_left_80##############")  # 왼쪽턴 80
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=2
+            msg_moving.moving_value_angular=80
+            msg_moving.moving_value_linear=0.0
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############go_str_40cm##############")  # 전진 45cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.45
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############tur_right_88##############")  # 오른쪽턴 88
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=3
+            msg_moving.moving_value_angular=88
+            msg_moving.moving_value_linear=0.0
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############go_str_30cm##############")  # 전진 25cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.25
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############tur_left_90##############")  # 왼쪽턴 90
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=2
+            msg_moving.moving_value_angular=90
+            msg_moving.moving_value_linear=0.0
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############go_str_45cm##############")  # 전진 45cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.4
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############tur_left_90##############")  # 왼쪽턴 90
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=2
+            msg_moving.moving_value_angular=90
+            msg_moving.moving_value_linear=0.0
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############go_str_25cm##############")  # 전진 25cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.25
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############tur_right_90##############")  # 오른쪽턴 90
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=3
+            msg_moving.moving_value_angular=90
+            msg_moving.moving_value_linear=0.0
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############go_str_50cm##############")  # 전진 50cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.50
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############tur_left_80##############")  # 왼쪽턴 80
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=2
+            msg_moving.moving_value_angular=80
+            msg_moving.moving_value_linear=0.0
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+
+	    rospy.loginfo("##############go_str_10##############")  # 전진 10cm
+            msg_moving = MovingParam()
+	    msg_moving.moving_type=4
+            msg_moving.moving_value_angular=0.0
+            msg_moving.moving_value_linear=0.1
+            self.pub_moving.publish(msg_moving)
+            while True:
+                if self.is_moving_complete == True:
+                    break
+            self.is_moving_complete = False
+            rospy.sleep(1)
+#########################################################
+            #msg_moving.moving_type=2
+            #msg_moving.moving_value_angular=80
+            #msg_moving.moving_value_linear=0.0
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_str")
+            #msg_moving.moving_type= 4
+            #msg_moving.moving_value_angular=0.0
+            #msg_moving.moving_value_linear=0.2
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_ri")
+            #msg_moving.moving_type=3
+            #msg_moving.moving_value_angular=80
+            #msg_moving.moving_value_linear=0.0
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_str2")
+            #msg_moving.moving_type= 4
+            #msg_moving.moving_value_angular=0.0
+            #msg_moving.moving_value_linear=0.4
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_ri2")
+            #msg_moving.moving_type=3
+            #msg_moving.moving_value_angular=80
+            #msg_moving.moving_value_linear=0.0
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_str3")
+            #msg_moving.moving_type= 4
+            #msg_moving.moving_value_angular=0.0
+            #msg_moving.moving_value_linear=0.20
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_lf2")
+            #msg_moving.moving_type=2
+            #msg_moving.moving_value_angular=90
+            #msg_moving.moving_value_linear=0.0
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_str4")
+            #msg_moving.moving_type=4
+            #msg_moving.moving_value_angular=0.0
+            #msg_moving.moving_value_linear=0.40
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            #rospy.loginfo("doing motion_lf3")
+            #msg_moving.moving_type=2
+            #msg_moving.moving_value_angular=80
+            #msg_moving.moving_value_linear=0.0
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+            #self.is_moving_complete = False
+
+            #rospy.sleep(1)
+
+            # msg_moving = movingParam()
+
+            #msg_moving.moving_type=4
+            #msg_moving.moving_value_angular=0.0
+            #msg_moving.moving_value_linear=0.5
+            #self.pub_moving.publish(msg_moving)
+            #while True:
+            #    if self.is_moving_complete == True:
+            #        break
+         
+            #self.is_moving_complete = False
+
+            msg_pub_construction_return.data = self.StepOfConstruction.motion_lf.value        
+
+            #rospy.sleep(3)
+
+        elif order.data == self.StepOfConstruction.exit.value:
+
+            rospy.loginfo("construction finished")
+
+            msg_pub_construction_return.data = self.StepOfConstruction.exit.value
+
+        self.pub_construction_return.publish(msg_pub_construction_return)
+
+    def cbConstructionFinished(self, construction_finished_msg):
+        self.is_construction_finished = True
+
+    def cbScanObstacle(self, scan):
+        angle_scan = 25
+        scan_start = 0 - angle_scan
+        scan_end = 0 + angle_scan
+        threshold_distance = 0.30
+        is_obstacle_detected = False
+
+        for i in range(scan_start, scan_end):
+            if scan.ranges[i] < threshold_distance and scan.ranges[i] > 0.01:
+                is_obstacle_detected = True
+
+        self.is_obstacle_detected = is_obstacle_detected
+
+    def main(self):
+        rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('detect_contruction')
+    node = DetectContruction()
+    node.main()

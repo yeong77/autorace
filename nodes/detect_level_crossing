@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy, os,time, cv2
+import numpy as np
+from cv_bridge import CvBridge
+from enum import Enum
+from geometry_msgs.msg import Twist
+from std_msgs.msg import UInt8, Float64, String, Float32
+from sensor_msgs.msg import LaserScan,Image, CompressedImage
+from turtlebot3_msgs.msg import SensorState
+import time
+
+class LevelCrossing:
+	def __init__(self):
+		self.sub_sonar = rospy.Subscriber('sensor_state', SensorState, self.get_sonar, queue_size = 1)
+    
+		self.pub_Sonar_State = rospy.Publisher('sonar_state', UInt8, queue_size = 1) 		    #opencr
+		self.pub_lane = rospy.Publisher('/lane', UInt8, queue_size = 1)	        		    #lane
+		self.pub_sign = rospy.Publisher('/detect/traffic_sign', UInt8, queue_size = 1)
+		self.pub_operation_state = rospy.Publisher('/operation_state', UInt8, queue_size = 1) # 동작하는 동안 표지판 감지 못하게 하는 용도
+     
+		self.SonarState = Enum('SonarState', 'stop start')
+
+		self.is_research = False
+		self.is_level_detected = False
+		self.is_level_opened = False
+		self.is_stay_1s = False
+		self.detect_distance_value = 20
+		self.Sonar_State = UInt8() # 'sonar_state' 메세지로 보낼려고 하는 초음파 상태
+		self.lane_state = UInt8() # 'lane_state' 메세지로 보낼려고 하는 lane following 상태
+		self.operation_state=UInt8();
+		self.control = 0 # 3번 연속으로 메세지를 pub해주기 위해
+
+		self.sonar()
+
+	def sonar_start_msg(self):
+		self.Sonar_State.data = self.SonarState.start.value
+		self.pub_Sonar_State.publish(self.Sonar_State)
+
+	def sonar_stop_msg(self):
+		self.Sonar_State.data = self.SonarState.stop.value
+		self.pub_Sonar_State.publish(self.Sonar_State)
+		for i in range(1, 3):
+			self.operation_state.data = 0 # 표지판 감지할 수 있도록 만듦
+			self.pub_operation_state.publish(self.operation_state) # 혹시 몰라서 메시지 3번 보냄
+
+	def lane_start_msg(self):
+		self.lane_state.data = 1
+		self.pub_lane.publish(self.lane_state)
+
+	def lane_stop_msg(self):
+		self.lane_state.data = 0
+		self.pub_lane.publish(self.lane_state)
+
+	def get_sonar(self, sensor):					#level_corssing 함수
+
+		if self.is_level_detected == False and sensor.sonar != 0 and sensor.sonar <= self.detect_distance_value:
+			rospy.loginfo("close")
+			self.is_level_detected=True
+			self.lane_stop_msg()
+
+		elif self.is_stay_1s == False and self.is_level_detected == True and sensor.sonar > 35:
+			rospy.loginfo("stay 1s")
+			rospy.sleep(1) #2201004 LM start
+			self.is_stay_1s = True
+
+		elif self.is_stay_1s == True and sensor.sonar != 0 and sensor.sonar <= self.detect_distance_value:
+			rospy.loginfo("find again")
+			self.is_research = True
+
+		elif self.is_research == True and sensor.sonar > 35:
+			rospy.loginfo("go 2")
+			self.lane_start_msg()
+			self.sonar_stop_msg()
+
+		elif self.is_research == False and self.is_stay_1s == True and sensor.sonar > 35:
+			rospy.loginfo("go 1")
+			self.lane_start_msg()
+			self.sonar_stop_msg()
+
+			sign = UInt8()
+			sign.data = 4 #tunnel
+			self.pub_sign.publish(sign)
+			
+
+
+	def sonar(self):					#level_crossing 함수 
+		rate = rospy.Rate(10)
+		while not rospy.is_shutdown():
+			rate.sleep()
+   
+   	
+	def main(self):
+		rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('detect_level_crossing')
+    node = LevelCrossing()
+    node.main()
+

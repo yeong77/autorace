@@ -1,0 +1,220 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import rospy, cv2, os
+import numpy as np
+from cv_bridge import CvBridge
+from std_msgs.msg import UInt8, Float64
+from sensor_msgs.msg import Image, CompressedImage
+from geometry_msgs.msg import Twist
+import time
+
+h = 0
+s = 0
+maskr = 0
+maskg = 0
+class Follower:
+	
+	def __init__ (self):
+		self.sub_image_original= rospy.Subscriber('/camera1/usb_cam1/image_raw', Image, self.cbFindLane, queue_size = 1)
+		self.pub_cmd_vel = rospy.Publisher('/control/cmd_vel', Twist, queue_size = 1)
+		self.pub_lane = rospy.Publisher('/lane', UInt8, queue_size = 1)
+		self.pub_detect_sign = rospy.Publisher("/detect/traffic_sign", UInt8, queue_size=1)
+		#self.pub_image_lane = rospy.Publisher('/detect/image_output/compressed', CompressedImage, queue_size = 1)
+
+		self.cvBridge = CvBridge()
+		self.counter = 1
+		self.cut = 0 
+		
+
+	def cbFindLane(self, image_msg):
+		global h, s, red, maskr, maskg
+		while (True):
+			if self.counter % 3 != 0:
+				self.counter += 1
+				return
+			else:			
+				self.counter = 1
+			font = cv2.FONT_HERSHEY_SIMPLEX
+			cv_image = self.cvBridge.imgmsg_to_cv2(image_msg, "bgr8")
+
+			hsv= cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)#색상 채도 명도
+			
+			size = cv_image.shape
+
+			r = 5
+			bound = 4.0 / 10
+			
+			twist = Twist()
+#black 0,0,0 - 360,255,50
+#0,0,0 - 180,255,30
+#0,0,0 - 0,255,255
+##################################################RED###################################################
+			if self.cut <= 20:
+				lower_red1 = np.array([0,100,100])
+				upper_red1 = np.array([10,255,255])
+				lower_red2 = np.array([160,100,100])
+				upper_red2 = np.array([180,255,255])
+
+				mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+				mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+			
+				maskr = cv2.add(mask1, mask2)
+				#r_circles = cv2.HoughCircles(maskr, cv2.HOUGH_GRADIENT, 1, 90,param1=50, param2=30, minRadius=0, maxRadius=0)
+				r_circles = cv2.HoughCircles(maskr, cv2.HOUGH_GRADIENT, 1, 90,param1=50, param2=20, minRadius=10, maxRadius=50)#이미지, 검출방법, 해상도 비율, 최소거리, 캐니 엣지, 중심, 최소 r, 최대 r
+				#최소거리는 검출된 원과 원 사이의 최소 거리
+
+				#print r_circles # [x1, y1, r1 \n x2, y2, r2 \n x3, y3, r3] x,y : circle (x,y) , r : 
+
+				
+
+				if r_circles is not None:
+					r_circles = np.uint16(np.around(r_circles))
+					print r_circles
+
+					for i in r_circles[0, :]:
+						cv2.circle(cv_image, (i[0], i[1]), i[2], (255, 255, 255), 2)
+						cv2.circle(maskr, (i[0], i[1]), i[2], (255, 255, 255), 2)
+						cv2.putText(cv_image,'RED',(i[0], i[1]), font, 1,(0,0,255),2,cv2.LINE_AA)
+						self.cut += 1
+				elif r_circles == None:
+					self.cut -= 1
+					if self.cut < 0:
+						self.cut = 0
+
+				elif self.cut >= 20:
+					print("RED")
+				##############STOP#############
+				twist.linear.x = 0
+				twist.linear.y = 0
+				twist.linear.z = 0
+				twist.angular.x = 0
+				twist.angular.y = 0
+				twist.angular.z = 0
+				self.pub_cmd_vel.publish(twist)
+				###############################
+
+				cv2.imshow('mask_RED', maskr)
+
+##################################################YELLOW###################################################
+			elif self.cut > 20 and self.cut <= 40:
+				lower_yellow = np.array([0,130,80]) #[20,150,100] / [20,120,120] / [10,150,100]
+				upper_yellow = np.array([30,255,255])#[135,131,61] / [30,255,255] / [30,255,255]
+		
+				masky = cv2.inRange(hsv, lower_yellow, upper_yellow)
+				#r_circles = cv2.HoughCircles(maskr, cv2.HOUGH_GRADIENT, 1, 10,param1=50, param2=30, minRadius=0, maxRadius=0)
+				y_circles = cv2.HoughCircles(masky, cv2.HOUGH_GRADIENT, 1, 90,param1=50, param2=20, minRadius=10, maxRadius=50)
+				if y_circles is not None:
+					y_circles = np.uint16(np.around(y_circles))
+
+					for i in y_circles[0, :]:
+						cv2.circle(cv_image, (i[0], i[1]), i[2], (0, 255, 0), 2)
+						#cv2.circle(cv_image, (i[0], i[1]), i[2]+10, (0, 255, 0), 2)
+						cv2.circle(masky, (i[0], i[1]), i[2], (255, 255, 255), 2)
+						#cv2.circle(maskr, (i[0], i[1]), i[2]+30, (255, 255, 255), 2)
+						cv2.putText(cv_image,'YELLOW',(i[0], i[1]), font, 1,(255,0,0),2,cv2.LINE_AA)
+						self.cut += 1
+				elif y_circles == None:
+					self.cut -= 1
+					if self.cut < 21:
+						self.cut = 21
+
+				if self.cut >= 40:
+					print("YELLOW")
+			
+				##############SLOW#############
+				twist.linear.x = 0.02
+				twist.linear.y = 0
+				twist.linear.z = 0
+				twist.angular.x = 0
+				twist.angular.y = 0
+				twist.angular.z = 0
+				self.pub_cmd_vel.publish(twist)
+				###############################
+
+				cv2.imshow('mask_YELLOW', masky)
+
+##################################################GREEN###################################################	
+			elif self.cut > 40 and self.cut <= 50:#>+
+				#lower_green = np.array([120,27,20])
+				#upper_green = np.array([145,90,39])
+				lower_green = np.array([51,72,65])
+				upper_green = np.array([93,236,178])
+				maskg = cv2.inRange(hsv, lower_green, upper_green)
+				g_circles = cv2.HoughCircles(maskg, cv2.HOUGH_GRADIENT, 1, 90,param1=50, param2=20, minRadius=10, maxRadius=50)
+				if g_circles is not None:
+					g_circles = np.uint16(np.around(g_circles))
+
+					for i in g_circles[0, :]:
+						'''
+						if i[0] > size[1] or i[1] > size[0] or i[1] > size[0]*bound:
+							continue
+
+						h, s = 0.0, 0.0
+						for m in range(-r, r):
+							for n in range(-r, r):
+
+								if (i[1]+m) >= size[0] or (i[0]+n) >= size[1]:
+									continue
+								h += maskg[i[1]+m, i[0]+n]
+								s += 1
+						if h / s > 100:
+							cv2.circle(cv_image, (i[0], i[1]), i[2], (0, 255, 0), 2)
+							#cv2.circle(cv_image, (i[0], i[1]), i[2]+10, (0, 255, 0), 2)
+							cv2.circle(maskg, (i[0], i[1]), i[2], (255, 255, 255), 2)\
+							#cv2.circle(maskg, (i[0], i[1]), i[2]+30, (255, 255, 255), 2)
+							cv2.putText(cv_image,'GREEN',(i[0], i[1]), font, 1,(255,0,0),2,cv2.LINE_AA)
+						'''
+						cv2.circle(cv_image, (i[0], i[1]), i[2], (0, 255, 0), 2)
+						#cv2.circle(cv_image, (i[0], i[1]), i[2]+10, (0, 255, 0), 2)
+						cv2.circle(maskg, (i[0], i[1]), i[2], (255, 255, 255), 2)\
+						#cv2.circle(maskg, (i[0], i[1]), i[2]+30, (255, 255, 255), 2)
+						cv2.putText(cv_image,'GREEN',(i[0], i[1]), font, 1,(255,0,0),2,cv2.LINE_AA)
+						self.cut += 1
+				elif g_circles == None:
+					self.cut -= 1
+					if self.cut < 41:
+						self.cut = 41
+
+			elif self.cut >= 50:
+				print("GREEN")
+				
+
+				lane_pub = UInt8()
+				lane_pub = 1
+				self.pub_lane.publish(lane_pub)
+
+				sign_pub = UInt8()
+				sign_pub = 1  #intersection
+				self.pub_detect_sign.publish(sign_pub)
+				#############[민 여기에 퍼블리셔 하나 보내는 거 만들고 초음파센서 처럼 똑같이 메세지로 detect_lane에 있는 twist메세지 on/off 만들어. 원래 이부분에 detect_lane.launch 실행하도록 메세지 만들라했는데 미리 켜놓는게 더 나을 것 같아서 이해 했을거라 믿을게 화이팅]#############
+
+				cv2.imshow('mask_GREEN',maskg)
+				
+
+
+
+			print (self.cut)
+			cv2.imshow('detect',cv_image)
+			#cv2.imshow('detectLANE', hsv)#roi
+			#cv2.imshow('maskr', maskr)
+			#cv2.imshow('maskg',maskg)
+			if cv2.waitKey(1) & 0xFF == ord('q'):
+				break
+	'''		#print(i)
+	def talker():
+		i = 0
+		while not rospy.is_shutdown():
+			pub.publish(test)
+			rospy.loginfo(test)
+	'''	
+	def main(self):
+		
+		rospy.spin()# ROS노드가 shutdown 될 때까지 block 하는 함수, shutdown신호를 받을 때까지 무한루프      
+	
+if __name__ == '__main__':
+	rospy.init_node('detect_lane_simple_publisher_test')
+	#rate = rospy.Rate(10)
+	node = Follower()
+	node.main()
+	#talker()
+	#gpio.cleanup()

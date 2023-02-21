@@ -1,0 +1,106 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy, cv2, numpy
+from cv_bridge import CvBridge
+from std_msgs.msg import UInt8, Float64
+from sensor_msgs.msg import Image, CompressedImage
+from geometry_msgs.msg import Twist
+import time
+
+
+class Follower:
+	def __init__ (self):
+		self.sub_image_original= rospy.Subscriber('/usb_cam/image_raw', Image, self.cbFindLane, queue_size = 1) ###1
+		self.pub_image_lane = rospy.Publisher('/detect/image_output/compressed', CompressedImage, queue_size = 1)
+		self.pub_point = rospy.Publisher('/blue/point', UInt8, queue_size = 1)
+		self.pub_lane = rospy.Publisher('/detect/lane', Float64, queue_size = 1)
+		self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+		self.cvBridge = CvBridge()
+		self.counter = 1
+		self.lastError = 0.0  ###################################
+		self.MAX_VEL = 0.12
+		########stop########
+		self.sub_lane = rospy.Subscriber("/lane", UInt8, self.Receive_lane, queue_size=1)
+		self.sub_detect_sign = rospy.Subscriber("/detect/traffic_sign", UInt8, self.Receive_sign, queue_size=1)
+		self.lane = 0
+		self.sign = 1
+
+	def Receive_lane(self, msg):
+		self.lane = msg.data
+
+	def Receive_sign(self, msg):
+		self.sign = msg.data
+		
+	def cbFindLane(self, image_msg):###1
+		if self.counter % 1 != 0:
+			self.counter += 1
+			return
+		else:
+			self.counter = 1
+		cv_image = self.cvBridge.imgmsg_to_cv2(image_msg, "bgr8")
+				
+		hsv= cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+		lower_yellow= numpy.array([30-10, 30, 30])
+		upper_yellow= numpy.array([30+10, 255, 255])
+		mask= cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+		h, w, d = cv_image.shape
+		rospy.loginfo(cv_image.shape)
+		search_top= 1*h/4            # 인식 할 부분 영역 선택
+		search_bot= 1*h/4 + 20 
+		mask[0:search_top, 0:w] = 0  # 인식 외 부분을 0으로 필터 처리 
+		mask[search_bot:h, 0:w] = 0
+		M = cv2.moments(mask)	  # 중심을 계산하기 위한 moments() 함수 이용
+########################stop##########################
+			
+
+		if M['m00'] > 0:
+			cx = int(M['m10']/M['m00'])
+			cy = int(M['m01']/M['m00'])
+			if cx < 200:
+				point = UInt8()
+				point.data = 1
+				self.pub_point.publish(point)
+			elif cx >= 200:
+				point = UInt8()
+				point.data = 0
+				self.pub_point.publish(point)
+			# Reading an image in default mode
+			#cv_image = cap.read()
+			cv_image = cv2.circle(cv_image, (cx, cy), 20, (255,0,0), -1)
+			cv2.imshow('Image', cv_image)
+			cv2.waitKey(1)
+			err = cx - w/3                     # w/2 는 화면의 중앙, -> w/3 좌측 1/3 지점 			개소리그만하기!
+			test = (round(((-float(err) / 100) / 3), 1) - 0.6) * 3
+			if test <= -1.0:
+				test = test / 1.5
+			else:
+				pass
+
+ 			
+##################################################################################3
+			twist = Twist()
+			twist.linear.x = 0.22
+			twist.linear.y = 0
+			twist.linear.z = 0
+			twist.angular.x = 0
+			twist.angular.y = 0
+			twist.angular.z = test #-angular_z
+			
+			if self.lane == 1:
+				self.pub_cmd_vel.publish(twist)
+				rospy.loginfo("angular_z : %f", twist.linear.x)
+				self.pub_image_lane.publish(self.cvBridge.cv2_to_compressed_imgmsg(cv_image, "jpg"))	
+				print(test)
+			else:
+				pass		
+		
+	def main(self):
+		rospy.spin()   
+
+            
+if __name__ == '__main__':
+	rospy.init_node('detect_lane_simple')
+	node = Follower()
+	node.main()

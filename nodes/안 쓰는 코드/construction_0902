@@ -1,0 +1,81 @@
+#! /usr/bin/env python
+# _*_ coding:utf-8 _*_
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+import time
+import math
+
+class construction():
+	def __init__(self):
+		self.pub_cmd_vel = rospy.Publisher("cmd_vel", Twist, queue_size=10)
+		self.sub_scan_obstacle = rospy.Subscriber('/scan', LaserScan, self.scan_cb,queue_size=1)
+		self.state = 0
+		self.old_time = time.time()
+		self.time_interval = 0 
+		self.standard_angular = 1.3
+	def scan_cb(self, scan):
+		global left_min_index, right_min_index
+		scan = scan.ranges
+		
+		scan_left_tuple = scan[0:180]
+		scan_left_list = list(scan_left_tuple)
+		
+		for i in scan_left_list:#except
+			if i < 0.01:
+				zero = scan_left_list.index(i)
+				scan_left_list[zero] = 9
+			else:	
+				pass
+
+		scan_right_tuple = scan[180:360]
+		scan_right_list = list(scan_left_tuple)
+		scan_right_list = scan_right_list[::-1]
+		for i in scan_right_list:	
+			if i < 0.01:
+				zero = scan_right_list.index(i)
+				scan_right_list[zero] = 9
+				#print scan_right	
+			else:
+				pass
+		
+		left_min = min(scan_left_list)
+		left_min_index = scan_left.index(left_min)
+		
+		right_min = min(scan_right_list)
+		right_min_index = scan_right.index(right_min)
+		
+##########/default_line/-/default_line/-/default_line/-/default_line/-/default_line/##########
+		return left_min_index, right_min_index
+		twist = Twist()
+		twist.linear.x = 0.22
+		twist.angular.z = 0.0
+		self.pub_cmd_vel.publish(twist)
+		
+		if left_min_index > 85 and left_min_index < 95:
+			self.state = 'first'
+
+		elif self.state = 'first':
+			twist.angular.z = self.standard_angular
+			self.pub_cmd_vel.publish(twist)
+			if left_min < 15:
+				twist.angular.z = self.standard_angular - 0.1
+			if left_min
+				
+
+
+
+
+
+
+	def main(self):
+		rospy.spin()
+#def control():
+	
+if __name__ == "__main__":
+	rospy.init_node('construction_0902')
+	node = construction()
+	node.main()
+

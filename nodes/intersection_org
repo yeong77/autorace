@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy, cv2, numpy
+from turtlebot3_msgs.msg import SensorState
+from cv_bridge import CvBridge, CvBridgeError
+from std_msgs.msg import UInt8
+from sensor_msgs.msg import Image, CompressedImage
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+import tf
+import math
+import os
+from enum import Enum
+
+
+
+class Intersection:
+	def __init__ (self):
+
+		self.sub_mode = rospy.Subscriber('/detect/traffic_sign', UInt8, self.sub_intersection, queue_size = 10)
+		#'''publisher'''
+		self.pub_mission = rospy.Publisher('/detect/traffic_sign', UInt8, queue_size = 10)
+		self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+		self.pub_lane = rospy.Publisher('/lane', UInt8, queue_size = 10)
+		#'''robot basic setting'''
+		self.cvBridge = CvBridge()
+		self.lastError = 0.0
+		self.MAX_VEL = 0.12
+		#'''mission basic setting'''
+		self.intersection_left_mission = False
+		self.intersection_right_mission = False
+		self.intersection_escape_mission = False
+		self.lane = False
+		self.count = 0
+
+
+####################### Mission Decider #########################
+	
+	def sub_intersection(self, data):
+
+		global mission
+		mission = data.data
+
+		if mission == 5:	## left (= lane)
+			self.intersection_left_mission = True
+
+		if mission == 6:	## right
+			self.intersection_right_mission = True
+
+		if mission == "8":	# 진입 금지
+			self.intersection_escape_mission = True
+
+
+		if self.intersection_left_mission == True:
+			rospy.loginfo("LEFT_SIGN_DETECTED, KEEP_LANE_FOLLOWING")
+
+			self.left = True
+			self.intersection_left_mission = False
+
+		elif self.intersection_right_mission == True:
+			rospy.loginfo("RIGHT_SIGN_DETECTED, FORCE_MOVING_START")
+			lane = UInt8()
+			lane.data = 0
+			self.pub_lane.publish(lane)
+
+			while True:
+				twist = Twist()
+				twist.linear.x = 0.150
+				twist.angular.z = -0.6
+
+				self.pub_cmd_vel.publish(twist)
+				self.count = self.count + 1
+				if self.count == 250:
+					rospy.loginfo("FORCE_MOVING_FINISHED, LANE_FOLLOWING_START")
+					break
+			self.count = 0
+			self.lane = True
+			self.right = True
+			self.intersection_right_mission = False
+
+		elif self.intersection_escape_mission == True:	# 진입 금지 인식
+			if self.left == True:
+				rospy.loginfo("DON'T_ENTER_SIGN_DETECTED, KEEP_LANE_FOLLOWING")
+			elif self.right == True:
+				rospy.loginfo("DON'T_ENTER_SIGN_DETECTED, FORCE_MOVING_START")
+				while True:
+					lane = UInt8()
+					lane.data = 0
+					self.pub_lane.publish(lane)
+
+					twist,linear.x = 0.160
+					twist.angular.z = -0.5
+					self.pub_cmd_vel.publish(twist)
+					self.count = self.count + 1
+					if self.count == 400:
+						rospy.loginfo("FORCE_MOVING_FINISHED, LANE_FOLLOWING_START")
+						break
+			rospy.loginfo("INTERSECTION_MISSION_FINISHED")
+			rospy.loginfo("NOW_SEARCHING_CONSTRUCTION_SIGN")
+			lane = UInt8()
+			lane.data = 1
+			self.pub_mission.publish(lane)
+			self.intersection_escape_mission = False
+
+		elif self.lane == True:
+			lane = UInt8()
+			lane.data = 1
+			self.pub_lane.publish(lane)
+
+	def main(self):
+		rospy.spin()
+
+if __name__ == '__main__':
+	rospy.init_node('intersection')
+	node = Intersection()
+	node.main()

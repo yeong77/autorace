@@ -1,0 +1,124 @@
+#! /usr/bin/env python
+# _*_ coding:utf-8 _*_
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+
+
+
+
+
+class Scan_test():
+	#global FFR, FFL, FR, FL, RRF, LLF, RRB, LLB, BR, BL, BBR, BBL
+	def __init__(self):
+		self.pub_cmd_vel = rospy.Publisher("cmd_vel", Twist, queue_size=10)
+		self.sub_scan_obstacle = rospy.Subscriber('/scan', LaserScan, self.LaserScan, queue_size=1)
+		self.c = ""
+	
+	def LaserScan(self,scan):
+		global FFR, FFL, FR, FL, RRF, LLF, RRB, LLB, BR, BL, BBR, BBL
+		#scan = np.array(scan.ranges)
+		scan = scan.ranges #type = tuple 0~359
+		scan = list(scan)
+		for i in scan:
+			self.c = str(i)
+			while '0.0' in self.c:
+				self.c = self.c.remove('0.0')	
+		#while 0.0 in scan:
+			#scan = scan.remove(0.0)		
+		#scan = len(scan)#360
+		scan_min = min(scan)
+		print(self.c)
+		#angle = scan.index(min(scan))
+		#angle = result * 0.1
+
+		FFR = scan[330:359]
+		FFR = np.mean(FFR)#average 
+
+		FFL = scan[0:29]
+		FFL = np.mean(FFL)#average 
+
+		FR = scan[300:329]
+		FR = np.mean(FR)#average 
+
+		FL = scan[30:59]
+		FL = np.mean(FL)#average
+
+		RRF = scan[270:299]
+		RRF = np.mean(RRF)#average
+
+		LLF= scan[60:89]
+		LLF = np.mean(LLF)#average
+
+		RRB = scan[240:269]
+		RRB = np.mean(RRB)#average
+
+		LLB = scan[90:119]
+		LLB = np.mean(LLB)#average
+
+		BR = scan[210:239]
+		BR = np.mean(BR)#average
+
+		BL = scan[120:149]
+		BL = np.mean(BL)#average
+
+		BBR = scan[180:209]
+		BBR = np.mean(BBR)#average
+
+		BBL = scan[150:179]
+		BBL = np.mean(BBL)#average
+
+		check = ['FFR', 'FFL', 'FR', 'FL', 'RRF', 'LLF', 'RRB', 'LLB', 'BR', 'BL', 'BBR', 'BBL']
+		check_T = (FFR, FFL, FR, FL, RRF, LLF, RRB, LLB, BR, BL, BBR, BBL)
+		
+		result = check_T.index(min(check_T))	
+		#print type(result)
+		if scan_min < 0.1:
+			print(check[result])
+
+
+
+
+
+		#print(FFR)
+
+		#front = scan[0:45] , scan[315:359]
+		#FR = scan[30:60]
+
+		#left = scan[45:135]
+		#left = np.mean(left)#average
+
+	 	#BR = scan[120:150]
+		#back = scan[135:225]
+		#BL = scan[210:240]
+		#right = scan[225:315]
+		#FL = scan
+
+		#return FFR
+
+		#if front < 1:
+		#	print('succes')
+		#print(type(scan))
+		#print(scan)
+		#if result > 10 or result > 350:
+		#	print('eeeeeeeeeeeeeeeeeeeee')
+		#print(left)
+		#print(angle)
+
+	#def move(self):
+		#while not rospy.is_shutdown():
+		#print(FFR)
+
+	def main(self):
+		rospy.spin()
+
+
+
+
+
+if __name__ == "__main__":
+	rospy.init_node('test')
+	node = Scan_test()
+	node.main()

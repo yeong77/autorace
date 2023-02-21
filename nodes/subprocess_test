@@ -1,0 +1,63 @@
+#!/usr/bin/env python
+
+#import subprocess
+import rospy
+import roslaunch
+
+
+#1
+#command = "roslaunch turtlebot3_autorace_detect construction_navigation.launch"
+#result = subprocess.run(command.split(' '))
+#print(result.stdout)
+
+
+#2
+#result = subprocess.run(["roslaunch", "turtlebot3_autorace_detect", "construction_navigation.launch"])
+#print(result)
+
+#3
+#cmd = ["roslaunch", "turtlebot3_autorace_detect", "construction_navigation.launch"]
+#proc = subprocess.Popen(cmd)
+#time.sleep(1)
+#proc.terminate()
+
+#4
+'''
+package = 'turtlebot3_bringup'#'rqt_graph'#'turtlebot3_bringup'
+executable = 'turtlebot3_robot.launch'#'rqt_graph'#'turtlebot3_robot'
+node = roslaunch.core.Node(package, executable)
+
+launch = roslaunch.scriptapi.ROSLaunch()
+launch.start()
+
+process = launch.launch(node)
+aa = process.is_alive()
+print (aa)
+#process.stop()
+'''
+#5!!!!!!!!!!!!!!!!sucess!!!!!!!!!!!!!!!!
+
+rospy.init_node('subprocess_test', anonymous=True)
+uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+roslaunch.configure_logging(uuid)
+launch = roslaunch.parent.ROSLaunchParent(uuid, ["/home/pi/catkin_ws/src/turtlebot3/turtlebot3_bringup/launch/turtlebot3_robot.launch"])
+launch.start()
+rospy.loginfo("sucess")
+rospy.sleep(5)
+#launch.shutdown()
+
+#6
+'''
+uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+roslaunch.configure_logging(uuid)
+cli_args1 = ['turtlebot3_bringup', 'turtlebot3_robot.launch']
+
+roslaunch_file = roslaunch.rlutil.resolve_launch_arguments(cli_args1)
+roslaunch_args1 = cli_args1[2:]
+
+launch_files = [(roslaunch_file, roslaunch_args1)]
+
+parent = roslaunch.parent.ROSLaunchParent(uuid, launch_files)
+
+parent.start()
+'''

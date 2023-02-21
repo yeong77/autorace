@@ -1,0 +1,149 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy, cv2, numpy
+from turtlebot3_msgs.msg import SensorState
+from cv_bridge import CvBridge, CvBridgeError
+from std_msgs.msg import UInt8
+from sensor_msgs.msg import Image, CompressedImage
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+import tf
+import math
+import os
+from enum import Enum
+import time
+
+
+
+class Intersection:
+	def __init__ (self):
+
+		self.sub_mode = rospy.Subscriber("/detect/traffic_sign", UInt8, self.sub_intersection, queue_size = 1)
+		self.sub_intersection = rospy.Subscriber('/intersection', UInt8, self.lane_point, queue_size = 1)
+		#'''publisher'''
+		self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+		self.pub_lane = rospy.Publisher('/lane', UInt8, queue_size = 10)
+		self.pub_sign = rospy.Publisher('/detect/traffic_sign', UInt8, queue_size = 10)
+		self.pub_count_start = rospy.Publisher('/count', UInt8, queue_size = 10)
+		#'''robot basic setting'''
+		self.cvBridge = CvBridge()
+		self.lastError = 0.0
+		self.MAX_VEL = 0.12
+		#'''mission basic setting'''
+		self.intersection_left_mission = False
+		self.intersection_right_mission = False
+		self.intersection_escape_mission = False
+		self.lane = False
+		self.count = 0
+		self.mission = 0
+		self.point = 0
+		self.old_time = time.time()
+		self.time_interval = 0 
+		while not rospy.is_shutdown():
+			self.intersection()
+
+
+####################### Mission Decider #########################
+	
+	def sub_intersection(self, data):
+		self.mission = data.data
+
+	def lane_point(self, data):
+		self.point = data.data
+
+	def intersection(self):
+		new_time = time.time()
+		self.time_interval = new_time - self.old_time
+		#print(self.time_interval)
+		if self.time_interval > 5: 
+			count_start = UInt8()
+			count_start.data = 1
+			self.pub_count_start.publish(count_start)
+			
+		if self.point == 1:
+			#self.old_time = time.time()
+			#lane = UInt8()
+			#lane.data = 0
+			#self.pub_lane.publish(lane)
+
+			#twist = Twist()
+			#twist.linear.x = 0.0
+			#twist.angular.z = 0.0
+			#self.pub_cmd_vel.publish(twist)
+			#if self.mission == 5 and self.count == 0:	## left (= lane)
+				#self.intersection_left_mission = True
+				#self.old_time = time.time()
+				#self.count = 1
+				#self.point = 0
+
+			print("self.mission : %d" %(self.mission))
+
+			if self.mission == 6:	## right
+				lane = UInt8()
+				lane.data = 0
+				self.pub_lane.publish(lane)
+
+				print("righttttttttttttttttttttttttttttt")
+				self.intersection_right_mission = True
+				self.old_time = time.time()
+				self.point = 0			
+
+			self.point = 0
+
+			
+
+		if self.intersection_right_mission == True:
+			print("\n")
+			rospy.loginfo("RIGHT_SIGN_DETECTED")
+            
+			#while True:
+			twist = Twist()
+			new_time = time.time()
+			time_interval = new_time - self.old_time
+			print("time_interval : %f" %(time_interval))
+
+			if time_interval <= 1 :			# 1.5
+				print("GOGOGOGOOGOGOGOGOGOGO")
+				twist.linear.x = 1.5
+				twist.angular.z = 1.0
+				self.pub_cmd_vel.publish(twist)		
+
+			elif time_interval > 1 and time_interval <= 2.45:	# 1.5 / 2.5
+				print("turn right")
+				twist.linear.x = 1.0
+				twist.angular.z = -1.35
+				self.pub_cmd_vel.publish(twist)		
+	
+			elif time_interval > 2.45 and time_interval <= 9.5:
+				print("lane following")
+				lane = UInt8()
+				lane.data = 1
+				self.pub_lane.publish(lane)
+
+			elif time_interval > 9.5 and time_interval <= 10.8:
+				print("exit")
+				lane = UInt8()
+				lane.data = 0
+				self.pub_lane.publish(lane)
+
+				twist.linear.x = 1.0
+				twist.angular.z = -2.3
+				self.pub_cmd_vel.publish(twist)
+
+			else:
+				rospy.loginfo("FORCE_MOVING_FINISHED, LANE_FOLLOWING_START")
+				lane = UInt8()
+				lane.data = 1
+				self.pub_lane.publish(lane)
+				sign = UInt8()
+				sign.data = 7  #construction
+				self.pub_sign.publish(sign)
+
+	def main(self):
+		rospy.spin()
+
+if __name__ == '__main__':
+	rospy.init_node('Intersection')
+	node = Intersection()
+	node.main()

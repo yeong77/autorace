@@ -1,0 +1,480 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy, os,time, cv2
+import numpy as np # 221008 LM
+from cv_bridge import CvBridge # 221008 LM
+from enum import Enum
+from geometry_msgs.msg import Twist
+from std_msgs.msg import UInt8, Float64, String, Float32, Bool
+from sensor_msgs.msg import LaserScan,Image, CompressedImage # 221008 LM
+from turtlebot3_msgs.msg import SensorState
+import time
+
+
+class Parking:
+	def __init__(self):
+     #sub
+		self.sub_scan_value = rospy.Subscriber('/scan', LaserScan, self.DetectParking, queue_size=1)
+		self.sub_parking = rospy.Publisher('/parking', UInt8, self.receive, queue_size = 1)
+		#lane following 및 기본 사용 pub
+		self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+		self.pub_lane = rospy.Publisher('/lane', UInt8, queue_size=1)					#lane 켜고 끌것
+		self.start = 0
+		self.is_True=False
+		#self.is_pa=True
+		#self.success=False
+		self.cx = 0
+		self.old_time = time.time()
+		self.time_interval = 0
+		self.sleep=0
+		self.is_left_parking=True					#장애물이 왼쪽에 있을때 True
+		self.is_right_parking=False					#장애물이 오른쪽에 있을때 True
+
+	def receive(self,data):
+		self.start = data.data
+		self.cx = self.start
+		
+
+
+	def DetectParking(self, scan):
+		new_time = time.time()
+		self.time_interval = new_time - self.old_time
+		print("self.time_interval : %f" %(self.time_interval))
+		print("self.cx = %d" %(self.cx))
+
+		if self.is_left_parking == True:
+	#	threshold_distance = 0.3
+			lane=UInt8()						#레인 켤수 있게 토픽 보내주기
+			lane.data=1			
+			self.pub_lane.publish(lane)
+			rospy.loginfo("\nstart11111111111111")
+			if self.time_interval > 3 and self.cx == 1:
+			
+				'''
+				while(self.sleep==0):				#레이더에 주차 표지판이 걸리지 않게 디텍트 레인만 하게 해주는 코
+					rospy.sleep(13)
+					print("sleep finish")
+					self.sleep=1
+					break
+				'''
+
+				scan = scan.ranges
+				self.scan_left = list(scan[20:60])			#인식할 레이더의 범위
+
+				for i in self.scan_left: #scan_value_min		#라이더 값이 0.0으로 오류가 나서 0.0을 9로 변환
+					if i < 0.01:
+						zero = self.scan_left.index(i)
+						self.scan_left[zero] = 9
+					else:	
+						pass
+				self.scan_list = min(self.scan_left)
+				if self.scan_list < 0.33:				#레이더 최소 값을 고쳐 받아오기 위해 만든 이프문
+					print("range:",self.scan_list)
+					self.is_pa = False
+				else:
+					print("Fail")
+					print("range:",self.scan_list)
+					pass
+
+				#while(self.is_pa == False):				#0.33 이하가 되어야만 아래 코드 실행
+				print("success")
+				# 미션에서 시간으로 제어
+				time_first=time.time() + 1.5
+				time_second_turn=time.time() + 3.3			#4.5
+				time_second=time.time() + 4.8				#5.7
+				time_stop=time.time() + 5.7				#6.8
+				time_third=time.time() + 6.8				#8.0
+				time_third_turn=time.time() + 8.5			#10.0
+				time_forth=time.time() + 15.0				#12.5
+
+				###################################################
+				twist = Twist()
+				if self.scan_list < 0.33:
+					rospy.loginfo("stop1111")
+
+					lane=UInt8()					#레인 인식 끄기
+					lane.data = 0
+					self.pub_lane.publish(lane)
+		
+					rospy.loginfo("left obstacle")				#인식하면서 앞으로 직
+
+					op=0
+					np=op+0.1
+
+					self.is_True=True			#아래로 내려가기 위한 트루	
+					#self.is_pa=True				#위로 올라가지 않게 하기 위한 트루
+					#break
+
+
+				while(self.is_True==True):
+					if time.time() < time_first:			#앞으로 직진
+						print("first time:",time.time())
+						print("11111111111111111111")
+						twist.linear.x = 0.10
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 0
+						self.pub_cmd_vel.publish(twist)
+						op=time.time()
+
+					elif time.time() < np:								#0.1초 정도 멈출 것 
+						twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+						twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001)
+		
+					elif time.time() < time_second_turn:		#후진해서 들어가기 위한 회전	
+						print("second time:",round(time.time(),1))
+						print("222222222turn2222222")
+						twist.linear.x = -0.1
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 1.0
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001)
+						op=time.time()
+
+					elif time.time() < np:
+						twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+						twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001) 
+
+		
+					elif time.time() < time_second:			#회전후 후진
+						print("time:",round(time.time(),1))
+						print("2222222222straight222222222")		
+						twist.linear.x = -0.15					
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 0.1
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001)
+						op=time.time()
+
+					elif time.time() < np:
+						twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+						twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001) 
+		
+					elif time.time() < time_stop:			#잠깐 정지
+						print("time:",round(time.time(),1))
+						print("SSSSSSSSSSTTTTTTTTTTTTTOOOOOOOOOOOPPPPPPPPPPP")		
+						twist.linear.x = 0
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 0
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001)
+						op=time.time()
+
+					elif time.time() < np:
+						twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+						twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+						self.pub_cmd_vel.publish(twist)		
+						time.sleep(0.001) 
+
+					elif time.time() < time_third:			#앞으로 직진
+						print("time:",round(time.time(),1))
+						print("33333333333straight333333333333")
+						twist.linear.x = 0.15
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 0.0
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001)
+						op=time.time()
+
+					elif time.time() < np:
+						twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+						twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001) 
+		
+					elif time.time() < time_third_turn:		#직진 후 왼쪽으로 회전
+						print("time:",round(time.time(),1))
+						print("3333333turn3333333333")
+						twist.linear.x = 0.1
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 0.9
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001)
+						op=time.time()
+
+					elif time.time() < np:
+						twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+						twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+						self.pub_cmd_vel.publish(twist)
+						time.sleep(0.001) 
+		
+					else:						#빠져나오는 직진
+						print("time:", round(time.time(),1))
+						print("444444444444444444")				
+						twist.linear.x = 0.07
+						twist.linear.y = 0
+						twist.linear.z = 0
+						twist.angular.x = 0
+						twist.angular.y = 0
+						twist.angular.z = 0
+						self.pub_cmd_vel.publish(twist)
+						#self.is_parking=False
+						#self.parking_count=1
+						self.is_True=False
+						self.is_left_parking=False				#221008 : is_left_parking을 false로 해줘야 range를 다시 안받아옴. 위로 안돌아감.
+						break
+		
+		
+		
+					lane=UInt8()
+					lane.data=1
+					self.pub_lane.publish(lane)
+					
+					rospy.loginfo("start22222")
+
+
+
+
+
+		elif self.is_right_parking==True:
+	#	threshold_distance = 0.3
+			lane=UInt8()						#레인 켤수 있게 토픽 보내주기
+			lane.data = 1				
+			self.pub_lane.publish(lane)
+
+			rospy.loginfo("start33333")
+
+		
+			while(self.sleep==0):				#레이더에 주차 표지판이 걸리지 않게 디텍트 레인만 하게 해주는 코
+				rospy.sleep(17)
+				print("sleep finish")
+				self.sleep=1
+				break
+			scan = scan.ranges
+			self.scan_right = list(scan[300:340])			#인식할 레이더의 범위
+
+			for i in self.scan_right: #scan_value_min		#라이더 값이 0.0으로 오류가 나서 0.0을 9로 변환
+				if i < 0.01:
+					zero = self.scan_right.index(i)
+					self.scan_right[zero] = 9
+				else:	
+					pass
+			self.scan_list = min(self.scan_right)
+			if self.scan_list<0.33:				#레이더 최소 값을 고쳐 받아오기 위해 만든 이프문
+				print("launge:",self.scan_list)
+				self.is_pa=False
+			else:
+				print("Fail")
+				print("launge:",self.scan_list)
+				pass
+
+		#	while(self.is_pa==False):				#0.33 이하가 되어야만 아래 코드 실행
+			print("success")
+			# 미션에서 시간으로 제어
+			time_first=time.time() + 1.5
+			time_second_turn=time.time() + 3.3			#4.5
+			time_second=time.time() + 4.8				#5.7
+			time_stop=time.time() + 5.7				#6.8
+			time_third=time.time() + 6.8				#8.0
+			time_third_turn=time.time() + 8.5				#10.0
+			time_forth=time.time() + 15.0				#12.5
+
+				###################################################
+			twist = Twist()
+			if self.scan_list < 0.33:
+				rospy.loginfo("stop1111")
+				#self.lane_sonar=UInt8()
+				#self.lane_sonar.data=2
+				#self.pub_sonar_lane.publish(self.lane_sonar)
+				lane=Bool()					#레인 인식 끄기
+				lane.data = 0
+				self.pub_lane.publish(lane)
+	
+				rospy.loginfo("right obstacle")				#인식하면서 앞으로 직
+
+
+				op=0
+				np=op + 0.1
+
+
+				self.is_True=True			#아래로 내려가기 위한 트루	
+				#self.is_pa=True				#위로 올라가지 않게 하기 위한 트루
+				#break
+		
+
+
+			while(self.is_True == True):
+				if time.time() < time_first:			#앞으로 직진
+					print("first time:", time.time())
+					print("11111111111111111111")
+					twist.linear.x = 0.15
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = 0
+					self.pub_cmd_vel.publish(twist)
+					op=time.time()
+
+				elif time.time() < np:
+					twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+					twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001)
+	
+				elif time.time() < time_second_turn:		#후진해서 들어가기 위한 회전	
+					print("second time:",round(time.time(),1))
+					print("222222222turn2222222")
+					twist.linear.x = -0.1
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = -1.2
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001)
+					op=time.time()
+
+				elif time.time() < np:
+					twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+					twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001) 
+
+	
+				elif time.time() < time_second:			#회전후 후진
+					print("time:", round(time.time(),1))
+					print("2222222222straight222222222")		
+					twist.linear.x = -0.15					
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = -0.1
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001)
+					op=time.time()
+
+				elif time.time() < np:
+					twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+					twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001) 
+	
+				elif time.time() < time_stop:			#잠깐 정지
+					print("time:",round(time.time(),1))
+					print("SSSSSSSSSSTTTTTTTTTTTTTOOOOOOOOOOOPPPPPPPPPPP")		
+					twist.linear.x = 0
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = 0
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001)
+					op=time.time()
+
+				elif time.time() < np:
+					twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+					twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001) 
+	
+				elif time.time() < time_third:			#앞으로 직진
+					print("time:",round(time.time(),1))
+					print("33333333333straight333333333333")
+					twist.linear.x = 0.15
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = 0.0
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001)
+					op=time.time()
+
+				elif time.time() < np:
+					twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+					twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+	
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001) 
+	
+				elif time.time() < time_third_turn:		#직진 후 왼쪽으로 회전
+					print("time:",round(time.time(),1))
+					print("3333333turn3333333333")
+					twist.linear.x = 0.1
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = -0.9
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001)
+					op=time.time()
+
+				elif time.time() < np:
+					twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+					twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+					self.pub_cmd_vel.publish(twist)
+					time.sleep(0.001) 
+	
+				else:						#빠져나오는 직진
+					print("time:",round(time.time(),1))
+					print("444444444444444444")				
+					twist.linear.x = 0.07
+					twist.linear.y = 0
+					twist.linear.z = 0
+					twist.angular.x = 0
+					twist.angular.y = 0
+					twist.angular.z = 0
+					self.pub_cmd_vel.publish(twist)
+					#self.is_parking=False
+					#self.parking_count = 1
+					self.is_True=False
+					self.is_right_parking=False
+					break
+	
+	
+	
+
+				
+				rospy.loginfo("start22222")
+				lane=UInt8()						#레인 켤수 있게 토픽 보내주기
+				lane.data = 1				
+				self.pub_lane.publish(lane)
+
+
+	def main(self):
+		rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('detect_parking')
+    node = Parking()
+    node.main()
+
+    

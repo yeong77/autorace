@@ -1,0 +1,73 @@
+#! /usr/bin/env python
+# _*_ coding:utf-8 _*_
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import Twist
+import time
+from std_msgs.msg import UInt8
+
+
+class intersection():
+	def __init__(self):
+		self.sub_detect_sign = rospy.Subscriber("/detect/traffic_sign", UInt8, self.ReceiveMode, queue_size=1)
+		self.pub_cmd_vel = rospy.Publisher("cmd_vel", Twist, queue_size=10)
+		self.pub_lane = rospy.Publisher("/lane", UInt8, queue_size=1)
+		self.old_time = time.time()
+		self.time_interval = 0
+		self.current_msg = 0
+		while not rospy.is_shutdown():			
+			self.whiteflag_blueflag()		
+
+	def ReceiveMode(self, mode_msg):
+		self.current_msg = mode_msg.data
+
+	def whiteflag_blueflag(self):
+		if self.current_msg == 5: ###left
+			pass
+
+		elif self.current_msg == 6: ####right
+			new_time = time.time()
+			self.time_interval = new_time - self.old_time
+			print(self.time_interval)
+
+			if self.time_interval < 15:
+				twist = Twist()
+				twist.linear.x = 0.1
+				twist.angular.z = -1.5
+				self.pub_cmd_vel.publish(twist)
+				print("rrrrrrrrrrrrrrright < 15")
+				rospy.sleep(0.1)
+
+			elif self.time_interval > 20 and self.time_interval < 25:
+				msg_sign = UInt8()
+				msg_sign.data = 0    ###레인 안하게 함
+				self.pub_lane.publish(msg_sign)
+
+				twist = Twist()
+
+				twist.linear.x = 0.1
+				twist.angular.z = -1.5
+				self.pub_cmd_vel.publish(twist)
+				print("20 > rrrrrrrrrrrrrrright < 25")
+				rospy.sleep(0.1)
+
+			else:
+				msg_sign = UInt8()
+				msg_sign.data = 1
+				self.pub_lane.publish(msg_sign)
+				rospy.sleep(0.1)			
+
+	def main(self):
+		rospy.spin()
+
+
+
+
+
+	
+if __name__ == "__main__":
+	rospy.init_node('intersection')
+	node = intersection()
+	node.main()
+

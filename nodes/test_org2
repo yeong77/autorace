@@ -1,0 +1,307 @@
+#! /usr/bin/env python
+# _*_ coding:utf-8 _*_
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+import time
+
+
+class Scan_test():
+	def __init__(self):
+		self.pub_cmd_vel = rospy.Publisher("cmd_vel", Twist, queue_size=10)
+		self.sub_scan_obstacle = rospy.Subscriber('/scan', LaserScan, self.LaserScan, queue_size=1)
+		self.count = 0
+		self.old_time = time.time()
+		self.time_interval = 0 
+
+	def LaserScan(self,scan):
+		global ffr, ffl, fr, fl, rrf, llf, rrb, llb, br, bl, bbr, bbl, result1, result2
+		scan = scan.ranges #type = tuple 0~359
+		scan = list(scan)
+		#scan = len(scan)#360
+		scan_min = min(scan)
+		#angle = scan.index(min(scan))
+		#angle = result * 0.1
+		
+		scan1 = []
+		for i in scan:
+			if i > 0.5:
+				scan1.append(0.0)
+			else:
+				scan1.append(i)
+
+		scan = scan1 
+
+		ffr = []
+		FFR = scan[350:359]
+		for i in FFR:
+			if i != 0.0: 
+				ffr.append(i)
+				
+		ffr = np.mean(ffr)#average 
+		#print(ffr)
+
+		ffl = []
+		FFL = scan[0:9]
+		for i in FFL:
+			if i != 0.0: 
+				ffl.append(i)
+		ffl = np.mean(ffl)#average 
+		#print(ffl) 
+
+		fr = []
+		FR = scan[310:349]
+		for i in FR:
+			if i != 0.0:
+				fr.append(i)
+		fr = np.mean(fr)#average 
+
+		fl = []
+		FL = scan[10:39]
+		for i in FL:
+			if i != 0.0:
+				fl.append(i)
+		fl = np.mean(fl)#average
+
+		rrf = []
+		RRF = scan[270:309]
+		for i in RRF:
+			if i != 0.0:
+				rrf.append(i)
+		rrf = np.mean(rrf)#average
+
+		llf = []
+		LLF= scan[40:89]
+		for i in LLF:
+			if i != 0.0:
+				llf.append(i)
+		llf = np.mean(llf)#average
+		
+		rrb = []
+		RRB = scan[240:269]
+		for i in RRB:
+			if i != 0.0:
+				rrb.append(i)
+		rrb = np.mean(rrb)#average
+
+		llb = []
+		LLB = scan[90:119]
+		for i in LLB:
+			if i != 0.0:
+				llb.append(i)
+		llb = np.mean(llb)#average
+
+		br = []
+		BR = scan[210:239]
+		for i in BR:
+			if i != 0.0:
+				br.append(i)
+		br = np.mean(br)#average
+
+		bl = []
+		BL = scan[120:149]
+		for i in BL:
+			if i != 0.0:
+				bl.append(i)
+		bl = np.mean(bl)#average
+
+		bbr = []
+		BBR = scan[180:209]
+		for i in BBR:
+			if i != 0.0:
+				bbr.append(i)
+		bbr = np.mean(bbr)#average
+
+		bbl = []
+		BBL = scan[150:179]
+		for i in BBL:
+			if i != 0.0:
+				bbl.append(i)
+		bbl = np.mean(bbl)#average
+
+		check1= ['ffl', 'fl', 'llf', 'llb', 'bl','bbl']
+		check2= ['ffr','fr', 'rrf', 'rrb', 'br', 'bbr']
+		check_T1 = [ffl, fl, llf, llb, bl, bbl]
+		check_T2 = [ffr, fr, rrf, rrb, br, bbr]
+
+		check_a = []
+		check_b = []
+		check_Ta = []
+		check_Tb = [] 
+		
+		for i in check_T1:
+			if np.isnan(i) == False:
+				check_Ta.append(i)
+				check_a.append(check1[check_T1.index(i)])
+				
+		for j in check_T2:
+			if np.isnan(j) == False:
+				check_Tb.append(j)
+				check_b.append(check2[check_T2.index(j)])
+
+		try:
+			result1 = check_Ta.index(min(check_Ta))
+			result2 = check_Tb.index(min(check_Tb))
+		
+		except ValueError:
+			print("** Value Pass **")
+
+		print("\n")
+
+		try:
+			print("check_a(left) : %s " %(check_a[result1]))
+			print("check_b(right) : %s " %(check_b[result2]))
+
+		except IndexError:
+			print("** Index Pass **")
+
+		#print("rrf value : %f" %(rrf))
+		#print type(result)
+		twist = Twist()
+		new_time = time.time()
+		self.time_interval = new_time - self.old_time
+		print(self.old_time)
+		print(new_time)
+		print(self.time_interval)
+		
+
+		if self.count % 2 == 0:					#### left ####
+			print("left")
+			if rrf < 0.8 and self.time_interval < 10:
+				self.count += 1 
+				print("%d" %(self.count))
+
+			elif check_a[result1] == 'ffl':
+				print("ffl : %f" %(ffl))
+				twist.linear.x = 0.15
+				twist.angular.z = 0.0 
+				self.pub_cmd_vel.publish(twist)
+
+			elif check_a[result1] == 'fl':
+				print("fl : %f" %(fl))
+				twist.linear.x = 0.15
+				twist.angular.z = 0.0 
+				self.pub_cmd_vel.publish(twist)
+			
+			elif check_a[result1] == 'llf': 
+				print("llf : %f" %(llf))
+				twist.linear.x = 0.15
+				twist.angular.z = 0.7
+				self.pub_cmd_vel.publish(twist) 
+				if llf < 0.24:
+					twist.linear.x = 0.15
+					twist.angular.z = -0.1
+					self.pub_cmd_vel.publish(twist) 
+
+			elif  check_a[result1] == 'llb':
+				print("llb : %f" %(llb))
+				twist.linear.x = 0.15
+				twist.angular.z = 4.0 
+				self.pub_cmd_vel.publish(twist)
+				if llb < 0.15:
+					twist.linear.x = 0.15
+					twist.angular.z = -0.1
+					self.pub_cmd_vel.publish(twist) 
+
+			elif check_a[result1] == 'bl':
+				print("bl : %f" %(bl))
+				twist.linear.x = 0.15
+				twist.angular.z = 3.0
+				self.pub_cmd_vel.publish(twist)
+				if llb < 0.2:
+					twist.linear.x = 0.15
+					twist.angular.z = -0.1
+					self.pub_cmd_vel.publish(twist)
+
+			elif check_a[result1] == 'bbl':
+				print("bbl : %f" %(bbl))
+				twist.linear.x = 0.15
+				twist.angular.z = 3.0
+				self.pub_cmd_vel.publish(twist)
+				if llb < 0.2:
+					twist.linear.x = 0.15
+					twist.angular.z = -0.1
+					self.pub_cmd_vel.publish(twist)
+
+			else:
+				print("else")
+				twist.linear.x = 0.15
+				twist.angular.z = 0.0
+				self.pub_cmd_vel.publish(twist)
+
+
+		elif self.count % 2 == 1:				#### right ####
+			print("right")
+			if llf < 0.8 and self.time_interval > 10:
+				self.count += 1
+				print("%d" %(self.count))
+
+			elif check_b[result2] == 'ffr':
+				print("ffr : %f" %(ffr))
+				twist.linear.x = 0.15
+				twist.angular.z = 0.0
+				self.pub_cmd_vel.publish(twist)
+
+			elif check_b[result2] == 'fr':
+				print("fr : %f " %(fr))
+				twist.linear.x = 0.15
+				twist.angular.z = 0.0
+				self.pub_cmd_vel.publish(twist)
+
+			elif check_b[result2] == 'rrf':
+				print("rrf : %f" %(rrf))
+				twist.linear.x = 0.15
+				twist.angular.z = -0.5
+				self.pub_cmd_vel.publish(twist)
+				if rrf < 0.18:
+					twist.linear.x = 0.15
+					twist.angular.z = 0.1
+					self.pub_cmd_vel.publish(twist)
+
+			elif check_b[result2] == 'rrb':
+				print("rrb : %f" %(rrb))
+				twist.linear.x = 0.15
+				twist.angular.z = -1.0 
+				self.pub_cmd_vel.publish(twist)
+				if rrb < 0.18:
+					twist.linear.x = 0.15
+					twist.angular.z = 0.1
+					self.pub_cmd_vel.publish(twist)
+				
+			elif check_b[result2] == 'br':
+				print("br : %f" %(br))
+				twist.linear.x = 0.15
+				twist.angular.z = -3.0
+				self.pub_cmd_vel.publish(twist)
+				if br < 0.18:
+					twist.linear.x = 0.15
+					twist.angular.z = 0.1 
+					self.pub_cmd_vel.publish(twist)
+
+			elif check_b[result2] == 'bbr':
+				print("bbr : %f" %(bbr))
+				twist.linear.x = 0.15
+				twist.angular.z = -1.5
+				self.pub_cmd_vel.publish(twist)	
+				if bbr < 0.18:
+					twist.linear.x = 0.15
+					twist.angular.z = 0.1 
+					self.pub_cmd_vel.publish(twist)	
+		
+			else:
+				print("else")
+				twist.linear.x = 0.0
+				twist.angular.z = 0.0
+				self.pub_cmd_vel.publish(twist)	
+			
+
+	def main(self):
+		rospy.spin()
+
+
+if __name__ == "__main__":
+	rospy.init_node('test')
+	node = Scan_test()
+	node.main()

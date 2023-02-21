@@ -1,0 +1,262 @@
+#! /usr/bin/env python
+# _*_ coding:utf-8 _*_
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+import time
+import math
+from std_msgs.msg import UInt8
+
+class construction():
+	def __init__(self):
+		self.pub_cmd_vel = rospy.Publisher("cmd_vel", Twist, queue_size=10)
+		self.lane_pub = rospy.Publisher("/lane", UInt8, queue_size=1)
+		self.detect_sign_pub = rospy.Publisher("/detect/traffic_sign", UInt8, queue_size=1)
+		self.sub_scan_obstacle = rospy.Subscriber('/scan', LaserScan, self.scan_cb,queue_size=1)
+		self.sub_point = rospy.Subscriber("/blue/point", UInt8, self.point, queue_size=1)
+
+		self.twist = Twist()
+		self.construction_count = 0
+		self.construction_end_time = 50
+		self.construction_time_interval = 0
+		self.time_interval = 0
+		self.end_time = 50
+		self.BURGER_MAX_LIN_VEL = 0.22
+		self.BURGER_MAX_ANG_VEL_left = 2.4 #2.83
+		self.BURGER_MAX_ANG_VEL_right = 2.2 #2.83
+		self.target_linear_vel = 0.0
+		self.target_angular_vel = 0.0 # 1.3
+		self.state = 'Zero'
+
+
+	def point(self, point):
+		self.point = point.data
+		print(self.point)
+
+
+	def scan_cb(self, scan):
+
+		global left_min, right_min, left_min_index, right_min_index, target_linear_vel, target_angular_vel
+		
+		scan = scan.ranges
+		
+		scan_left_tuple = scan[0:180] #[850:95]
+		self.scan_left_list = list(scan_left_tuple)
+		
+		for i in self.scan_left_list: #except
+			if i < 0.01:
+				zero = self.scan_left_list.index(i)
+				self.scan_left_list[zero] = 9
+			else:	
+				pass
+
+		scan_right_tuple = scan[180:360] #[265:275]
+		self.scan_right_list = list(scan_right_tuple)
+		self.scan_right_list = self.scan_right_list[::-1]
+		for i in self.scan_right_list:	
+			if i < 0.01:
+				zero = self.scan_right_list.index(i)
+				self.scan_right_list[zero] = 9
+				#print scan_right	
+			else:
+				pass
+		
+		self.left_min = min(self.scan_left_list)
+		self.left_min_index = self.scan_left_list.index(self.left_min)
+		
+		self.right_min = min(self.scan_right_list)
+		self.right_min_index = self.scan_right_list.index(self.right_min)
+		
+		self.scan_left_list_2 = self.scan_left_list[50:60]
+		self.scan_left_list_2 = min(self.scan_left_list_2)
+		
+		print("\n")
+		print self.state
+		#print self.scan_left_list[55:65]
+		self.target_linear_vel = self.checkLinearLimitVelocity(self.target_linear_vel + 0.02)	
+			
+
+		if self.construction_time_interval < 15: ##16.5
+			#self.construction_end_time = 4
+			self.obstacle_3()
+
+		elif self.construction_time_interval > self.construction_end_time:
+			self.state = 'end'
+
+			lane = UInt8()
+			lane.data = 1
+			self.lane_pub.publish(lane)
+		else:
+			pass
+
+	
+
+	def obstacle_3(self):
+		print("obstacle_3")
+		print self.construction_end_time
+
+		if self.scan_left_list[95] < 0.28 and self.construction_count == 0:	# 2 / 7
+			self.state = 'first'	
+
+			self.construction_old_time = time.time()
+			self.construction_count = 1
+
+		elif self.scan_right_list[85] < 0.40 and self.construction_time_interval > 1 and self.construction_time_interval < 7:	# 7 / 11 // 85
+			self.state = 'second'
+
+		elif self.scan_left_list[85] < 0.40 and self.construction_time_interval > 7 and self.construction_time_interval < 11:	# 10 / 16 // 65
+			self.state = 'third'
+
+		#elif self.time_interval > 16 and self.time_interval < 18:
+		#	self.state = 'go_little'
+
+		elif self.construction_time_interval > 11.3 and self.construction_time_interval < 11.5:		# 18 / 19
+			self.state = 'stop'
+			self.stop()
+
+		elif self.construction_time_interval > 11.5:			# 19
+			self.state = 'lane'
+
+		self.detect()
+
+
+
+	def detect(self):
+		if self.state == 'Zero': 
+			self.lane = UInt8()
+			self.lane = 0
+			self.lane_pub.publish(self.lane)
+
+			twist = Twist()
+			twist.linear.x = 0.22; twist.linear.y = 0.0; twist.linear.z = 0.0
+			twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.05
+			self.pub_cmd_vel.publish(twist)
+
+			self.move()
+
+		elif self.state == 'first': 
+			print("turn left ###############")
+
+			construction_new_time = time.time()
+			self.construction_time_interval = construction_new_time - self.construction_old_time
+			print(self.construction_time_interval)
+
+			twist = Twist()
+			twist.linear.x = 0.22; twist.linear.y = 0.0; twist.linear.z = 0.0
+			twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 1.3
+			self.pub_cmd_vel.publish(twist)
+
+			self.target_linear_vel = 0.22
+			self.target_angular_vel = 1.3
+			self.move()	
+
+		elif self.state == 'second': 
+			print("turn right ###############")
+
+			construction_new_time = time.time()
+			self.construction_time_interval = construction_new_time - self.construction_old_time
+			print(self.construction_time_interval)
+
+			twist = Twist()
+			twist.linear.x = 0.22; twist.linear.y = 0.0; twist.linear.z = 0.0
+			twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = -1.3
+			self.pub_cmd_vel.publish(twist)
+
+			self.target_linear_vel = 0.22
+			self.target_angular_vel = -1.3
+			self.move()	
+
+		elif self.state == 'third': 
+			print("turn left ###############")
+
+			construction_new_time = time.time()
+			self.construction_time_interval = construction_new_time - self.construction_old_time
+			print(self.construction_time_interval)
+
+			twist = Twist()
+			twist.linear.x = 0.22; twist.linear.y = 0.0; twist.linear.z = 0.0
+			twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 1.3
+			self.pub_cmd_vel.publish(twist)
+
+			self.target_linear_vel = 0.22
+			self.target_angular_vel = 1.3
+			self.move()
+
+		elif self.state == 'go_little': 
+			print("go straight ###############")
+			twist = Twist()
+			twist.linear.x = 0.22; twist.linear.y = 0.0; twist.linear.z = 0.0
+			twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+			self.pub_cmd_vel.publish(twist)
+
+			self.target_linear_vel = 0.22
+			self.target_angular_vel = 0.05
+			self.move()
+
+		elif self.state == 'lane': 
+			print("lane ###############")
+			construction_new_time = time.time()
+			self.construction_time_interval = construction_new_time - self.construction_old_time
+			print(self.construction_time_interval)
+			
+			lane = UInt8()
+			lane.data = 1
+			self.lane_pub.publish(lane)
+
+
+	def move(self):
+		twist = Twist()
+		print ("linear == %f" %(self.target_linear_vel))
+		print ("angular == %f" %(self.target_angular_vel))
+
+		twist.linear.x = self.target_linear_vel; twist.linear.y = 0.0; twist.linear.z = 0.0
+		twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = self.target_angular_vel
+
+		self.pub_cmd_vel.publish(twist)
+		#time.sleep(0.01)
+
+	def stop(self):
+		construction_new_time = time.time()
+		self.construction_time_interval = construction_new_time - self.construction_old_time
+		print(self.construction_time_interval)
+
+		twist = Twist()
+
+		twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0
+		twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0
+
+		self.pub_cmd_vel.publish(twist)
+		time.sleep(0.1)
+
+	def constrain(self,input, low, high):
+		if input < low: # create limit = -0.22
+			input = low
+		elif input > high: # create limit = 0.22
+			input = high
+		else:
+			input = input
+		return input
+
+	def checkLinearLimitVelocity(self,vel): # linear.x
+		vel = self.constrain(vel, -(self.BURGER_MAX_LIN_VEL), self.BURGER_MAX_LIN_VEL)
+		return vel # constrain - low or high(-0.22 or 0.22)
+
+	def checkAngularLimitVelocity_left(self,vel):# angular.z
+		vel = self.constrain(vel, -(self.BURGER_MAX_ANG_VEL_left), self.BURGER_MAX_ANG_VEL_left)
+		return vel
+	def checkAngularLimitVelocity_right(self,vel): # angular.z
+		vel = self.constrain(vel, -(self.BURGER_MAX_ANG_VEL_right), self.BURGER_MAX_ANG_VEL_right)
+		return vel
+
+
+	def main(self):
+		rospy.spin()
+#def control():
+	
+if __name__ == "__main__":
+	rospy.init_node('construction_left')
+	node = construction()
+	node.main()
+#else:
