@@ -177,8 +177,6 @@ class Follower:
 
 			elif self.cut >= 50:
 				print("GREEN")
-				
-
 				lane_pub = UInt8()
 				lane_pub = 1
 				self.pub_lane.publish(lane_pub)
@@ -186,8 +184,6 @@ class Follower:
 				sign_pub = UInt8()
 				sign_pub = 1  #intersection
 				self.pub_detect_sign.publish(sign_pub)
-				#############[민 여기에 퍼블리셔 하나 보내는 거 만들고 초음파센서 처럼 똑같이 메세지로 detect_lane에 있는 twist메세지 on/off 만들어. 원래 이부분에 detect_lane.launch 실행하도록 메세지 만들라했는데 미리 켜놓는게 더 나을 것 같아서 이해 했을거라 믿을게 화이팅]#############
-
 				cv2.imshow('mask_GREEN',maskg)
 				
 
